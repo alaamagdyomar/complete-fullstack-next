@@ -2,8 +2,11 @@ import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import appRouter from "./routers";
+import cookieParser from "cookie-parser";
 
 const app = express();
+
+app.use(cookieParser(process.env.COOKIE_SECRET));
 
 // 1- first step to make any request to go through to make the data type JSON
 app.use(express.json());

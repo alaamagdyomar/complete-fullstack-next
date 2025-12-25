@@ -3,6 +3,8 @@ import { pool } from "../mysql/connection";
 import { GET_USER_BY_EMAIL, GET_USER_BY_ID } from "../mysql/queries";
 import { INSERT_USER_STATEMENT } from "../mysql/mutation";
 import bcrypt from "bcrypt";
+import { generateJWTToken, saveRefreshToken } from "../token/jwt-token-manager";
+import { encryptData } from "../encryption";
 
 //resuable func
 const getUserBy = async (by: "email" | "id", value: string) => {
@@ -20,6 +22,60 @@ const getUserBy = async (by: "email" | "id", value: string) => {
     return user;
   } catch (err) {
     console.log("error while retrieving the user", err);
+  }
+};
+
+const setCookies = (
+  accessToken: string,
+  refreshToken: string,
+  res: Response
+) => {
+  res.clearCookie("access_token", {
+    domain: "localhost",
+    httpOnly: true,
+    path: "/",
+  });
+
+  res.clearCookie("refresh_token", {
+    domain: "localhost",
+    httpOnly: true,
+    path: "/",
+  });
+
+  const expiryAccessToken = new Date(new Date().getTime() + 60 * 60 * 1000);
+  const expiryRefreshToken = new Date(
+    new Date().getTime() + 7 * 24 * 60 * 60 * 1000
+  );
+
+  res.cookie("access_token", accessToken, {
+    domain: "localhost",
+    httpOnly: true,
+    path: "/",
+    expires: expiryAccessToken,
+    sameSite: "lax",
+  });
+
+  res.cookie("refresh_token", refreshToken, {
+    domain: "localhost",
+    httpOnly: true,
+    path: "/",
+    expires: expiryRefreshToken,
+    sameSite: "lax",
+  });
+
+  return;
+};
+
+const setAuthToken = async (id: string, email: string, res: Response) => {
+  try {
+    const accessToken = generateJWTToken(id, email, "access");
+    const refreshToken = generateJWTToken(id, email, "refresh");
+    const encryptedRefreshToken = encryptData(refreshToken);
+    await saveRefreshToken(refreshToken);
+    setCookies(accessToken, refreshToken, res);
+  } catch (error) {
+    console.log("Error = ", error);
+    throw error;
   }
 };
 
@@ -68,9 +124,15 @@ const registerUser = async (req: Request, res: Response) => {
       hashedPassword,
     ]);
 
+    //@ts-ignore
+    const insertId = result[0].insertID as Number;
+
+    //set token
+    await setAuthToken(String(insertId), email, res);
+
     return res
       .status(200)
-      .json({ message: "user created successfully", user: result });
+      .json({ message: "user register successfully", user: result });
   } catch (error) {
     console.log("Error occured = ", error);
     res
@@ -103,6 +165,9 @@ const loginUser = async (req: Request, res: Response) => {
         message: "incorrect password ",
       });
     }
+
+    // set tokens
+    await setAuthToken(String(user.id), email, res);
 
     return res.status(200).json({ message: "login successfully", user });
   } catch (error) {
